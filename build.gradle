@@ -1,0 +1,4 @@
+// Root project: no application code; subprojects (e.g. orderService) define their own build.
+subprojects {
+	group = 'com.aegis'
+}
