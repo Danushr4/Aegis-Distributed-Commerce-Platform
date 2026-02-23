@@ -1,11 +1,4 @@
 // Root project: no application code; subprojects (e.g. orderService) define their own build.
-plugins {
-	id 'wrapper'
-}
 subprojects {
 	group = 'com.aegis'
-	tasks.register('wrapper') {
-		group = 'Build Setup'
-		dependsOn rootProject.tasks.named('wrapper')
-	}
 }

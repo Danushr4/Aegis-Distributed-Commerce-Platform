@@ -1,4 +1,2 @@
 rootProject.name = 'aegis-platform'
 include 'orderService'
-include 'inventoryService'
-include 'paymentService'
