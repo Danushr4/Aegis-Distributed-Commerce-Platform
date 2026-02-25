@@ -26,6 +26,7 @@ repositories {
 
 ext {
 	set('springCloudVersion', "2025.1.0")
+	set('testcontainersVersion', "1.19.8")
 }
 
 dependencies {
@@ -49,12 +50,19 @@ dependencies {
 	testImplementation 'org.springframework.boot:spring-boot-starter-session-data-redis-test'
 	testImplementation 'org.springframework.boot:spring-boot-starter-validation-test'
 	testImplementation 'org.springframework.boot:spring-boot-starter-webmvc-test'
+	testImplementation 'org.testcontainers:junit-jupiter'
+	testImplementation 'org.testcontainers:postgresql'
 	testRuntimeOnly 'org.junit.platform:junit-platform-launcher'
 }
 
 dependencyManagement {
 	imports {
 		mavenBom "org.springframework.cloud:spring-cloud-dependencies:${springCloudVersion}"
+	}
+	dependencies {
+		dependency "org.testcontainers:testcontainers:${testcontainersVersion}"
+		dependency "org.testcontainers:junit-jupiter:${testcontainersVersion}"
+		dependency "org.testcontainers:postgresql:${testcontainersVersion}"
 	}
 }
 

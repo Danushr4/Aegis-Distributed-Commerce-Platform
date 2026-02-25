@@ -1,0 +1,10 @@
+# Test profile: Postgres via Testcontainers (url overridden in test), disable Redis
+spring:
+  autoconfigure:
+    exclude:
+      - org.springframework.boot.autoconfigure.data.redis.RedisAutoConfiguration
+      - org.springframework.boot.autoconfigure.data.redis.RedisReactiveAutoConfiguration
+  data:
+    redis:
+      host: localhost
+      port: 6379
