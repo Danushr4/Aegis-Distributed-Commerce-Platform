@@ -7,8 +7,11 @@ import com.aegis.orderservice.dto.IdempotentCreateResult;
 import com.aegis.orderservice.dto.OrderItemResponse;
 import com.aegis.orderservice.dto.OrderResponse;
 import com.aegis.orderservice.dto.PageResponse;
+import com.aegis.orderservice.metrics.OrderMetrics;
 import com.aegis.orderservice.services.resources.IOrderService;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import io.micrometer.core.instrument.MeterRegistry;
+import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.BeforeEach;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -52,6 +55,21 @@ class OrdersControllerIdempotencyTest {
         @Bean
         ObjectMapper objectMapper() {
             return new ObjectMapper();
+        }
+
+        @Bean
+        java.util.concurrent.Semaphore orderCreateSemaphore() {
+            return new java.util.concurrent.Semaphore(100);
+        }
+
+        @Bean
+        OrderMetrics orderMetrics(MeterRegistry registry) {
+            return new OrderMetrics(registry);
+        }
+
+        @Bean
+        MeterRegistry meterRegistry() {
+            return new SimpleMeterRegistry();
         }
     }
 

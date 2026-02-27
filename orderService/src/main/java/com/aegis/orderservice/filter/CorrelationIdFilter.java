@@ -40,6 +40,7 @@ public class CorrelationIdFilter extends OncePerRequestFilter {
             filterChain.doFilter(request, response);
         } finally {
             MDC.remove(MDC_KEY);
+            MDC.remove("orderId");
         }
     }
 }

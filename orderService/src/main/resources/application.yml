@@ -25,8 +25,68 @@ logging:
   pattern:
     console: "%d{yyyy-MM-dd HH:mm:ss.SSS} %5level [%thread] [%X{correlationId:-}] [%X{orderId:-}] %logger{36} - %msg%n"
 
+# App-specific: dependency timeouts, rate limit, backpressure
+app:
+  dependency:
+    connectTimeoutMs: 2000
+    responseTimeoutMs: 5000
+    dummyBaseUrl: "http://localhost:9999"
+  rateLimit:
+    postOrdersCapacity: 100
+    postOrdersRefillPerSecond: 20
+    getOrderCapacity: 200
+    getOrderRefillPerSecond: 50
+  backpressure:
+    maxConcurrentOrderCreates: 50
+
+# Resilience4j: retry only for transient (timeouts, 5xx), circuit breaker per dependency, bulkhead
+resilience4j:
+  retry:
+    configs:
+      default:
+        maxAttempts: 3
+        waitDuration: 500ms
+        retryExceptions: org.springframework.web.reactive.function.client.WebClientRequestException, org.springframework.web.reactive.function.client.WebClientResponseException
+        ignoreExceptions: java.lang.IllegalArgumentException, com.aegis.orderservice.client.ClientErrorException
+    instances:
+      dummyDependency:
+        baseConfig: default
+  circuitbreaker:
+    configs:
+      default:
+        slidingWindowSize: 10
+        failureRateThreshold: 50
+        waitDurationInOpenState: 10s
+        permittedNumberOfCallsInHalfOpenState: 3
+        recordExceptions: java.lang.Exception
+    instances:
+      dummyDependency:
+        baseConfig: default
+  bulkhead:
+    configs:
+      default:
+        maxConcurrentCalls: 20
+        maxWaitDuration: 0
+    instances:
+      dummyDependency:
+        baseConfig: default
+
 management:
   endpoints:
     web:
       exposure:
         include: health,info,metrics,prometheus
+  metrics:
+    enable:
+      jvm: true
+      process: true
+      http: true
+      hikaricp: true
+  endpoint:
+    metrics:
+      enabled: true
+  health:
+    db:
+      enabled: true
+    redis:
+      enabled: true

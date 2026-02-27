@@ -1,10 +1,12 @@
 package com.aegis.orderservice.services;
 
 import com.aegis.orderservice.dto.OrderResponse;
+import com.aegis.orderservice.metrics.OrderMetrics;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnBean;
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.stereotype.Service;
@@ -32,17 +34,26 @@ public class OrderCacheService {
 
     private final StringRedisTemplate redis;
     private final ObjectMapper objectMapper;
+    private final OrderMetrics orderMetrics;
 
-    public OrderCacheService(StringRedisTemplate redis, ObjectMapper objectMapper) {
+    public OrderCacheService(StringRedisTemplate redis, ObjectMapper objectMapper,
+                             @Autowired(required = false) OrderMetrics orderMetrics) {
         this.redis = redis;
         this.objectMapper = objectMapper;
+        this.orderMetrics = orderMetrics != null ? orderMetrics : null;
     }
 
     public Optional<OrderResponse> get(UUID orderId) {
         String key = KEY_PREFIX + orderId;
         String raw = redis.opsForValue().get(key);
         if (raw != null) {
+            if (orderMetrics != null) {
+                orderMetrics.recordCacheHit();
+            }
             return parseOrderResponse(raw);
+        }
+        if (orderMetrics != null) {
+            orderMetrics.recordCacheMiss();
         }
         return Optional.empty();
     }

@@ -6,9 +6,12 @@ import com.aegis.orderservice.dto.CreateOrderResponse;
 import com.aegis.orderservice.dto.IdempotentCreateResult;
 import com.aegis.orderservice.dto.OrderResponse;
 import com.aegis.orderservice.dto.PageResponse;
+import com.aegis.orderservice.exception.ServiceOverloadedException;
+import com.aegis.orderservice.metrics.OrderMetrics;
 import com.aegis.orderservice.services.resources.IOrderService;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import io.micrometer.core.instrument.Timer;
 import jakarta.validation.Valid;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
@@ -17,7 +20,10 @@ import org.springframework.web.servlet.support.ServletUriComponentsBuilder;
 
 import java.util.List;
 import java.util.Map;
+import org.slf4j.MDC;
+
 import java.util.UUID;
+import java.util.concurrent.Semaphore;
 
 @RestController
 @RequestMapping("/api/v1/orders")
@@ -32,14 +38,20 @@ public class OrdersController {
 
     private final IOrderService ordersService;
     private final ObjectMapper objectMapper;
+    private final Semaphore orderCreateSemaphore;
+    private final OrderMetrics orderMetrics;
 
-    public OrdersController(IOrderService ordersService, ObjectMapper objectMapper) {
+    public OrdersController(IOrderService ordersService, ObjectMapper objectMapper,
+                            Semaphore orderCreateSemaphore, OrderMetrics orderMetrics) {
         this.ordersService = ordersService;
         this.objectMapper = objectMapper;
+        this.orderCreateSemaphore = orderCreateSemaphore;
+        this.orderMetrics = orderMetrics;
     }
 
     @GetMapping("/{orderId}")
     public ResponseEntity<?> getOrderById(@PathVariable UUID orderId) {
+        MDC.put("orderId", orderId.toString());
         return ordersService.getOrderById(orderId)
                 .map(ResponseEntity::ok)
                 .orElse(ResponseEntity.notFound().build());
@@ -80,23 +92,34 @@ public class OrdersController {
             return ResponseEntity.badRequest()
                     .body(Map.of("error", "Idempotency-Key header is required"));
         }
-        IdempotentCreateResult result = ordersService.createOrderIdempotent(idempotencyKey.trim(), request);
-        if (result.getType() == IdempotentCreateResult.Type.CREATED) {
-            CreateOrderResponse created = result.getResponse();
-            return ResponseEntity
-                    .status(201)
-                    .location(ServletUriComponentsBuilder.fromCurrentRequest().path("/{id}").buildAndExpand(created.getOrderId()).toUri())
-                    .body(created);
+        boolean acquired = orderCreateSemaphore.tryAcquire();
+        if (!acquired) {
+            throw new ServiceOverloadedException("Too many concurrent order creations; try again later");
         }
-        // REPLAY: return stored status and exact stored body (parse so we don't double-encode)
+        Timer.Sample latencySample = orderMetrics.startCreateLatency();
         try {
-            Object body = objectMapper.readValue(result.getResponseBodyJson(), Object.class);
-            return ResponseEntity
-                    .status(result.getResponseCode())
-                    .contentType(MediaType.APPLICATION_JSON)
-                    .body(body);
-        } catch (JsonProcessingException e) {
-            throw new IllegalStateException("Stored response body is not valid JSON", e);
+            IdempotentCreateResult result = ordersService.createOrderIdempotent(idempotencyKey.trim(), request);
+            if (result.getType() == IdempotentCreateResult.Type.CREATED) {
+                CreateOrderResponse created = result.getResponse();
+                MDC.put("orderId", created.getOrderId().toString());
+                return ResponseEntity
+                        .status(201)
+                        .location(ServletUriComponentsBuilder.fromCurrentRequest().path("/{id}").buildAndExpand(created.getOrderId()).toUri())
+                        .body(created);
+            }
+            // REPLAY: return stored status and exact stored body (parse so we don't double-encode)
+            try {
+                Object body = objectMapper.readValue(result.getResponseBodyJson(), Object.class);
+                return ResponseEntity
+                        .status(result.getResponseCode())
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .body(body);
+            } catch (JsonProcessingException e) {
+                throw new IllegalStateException("Stored response body is not valid JSON", e);
+            }
+        } finally {
+            orderMetrics.recordCreateLatency(latencySample);
+            orderCreateSemaphore.release();
         }
     }
 }

@@ -15,6 +15,7 @@ import com.aegis.orderservice.exception.IdempotencyConflictException;
 import com.aegis.orderservice.exception.IdempotencyStillProcessingException;
 import com.aegis.orderservice.repository.IdempotencyKeysRepository;
 import com.aegis.orderservice.repository.OrderRepository;
+import com.aegis.orderservice.metrics.OrderMetrics;
 import com.aegis.orderservice.repository.OrderSpecs;
 import com.aegis.orderservice.services.OrderCacheService;
 import com.aegis.orderservice.services.resources.IOrderService;
@@ -51,15 +52,18 @@ public class OrdersService implements IOrderService {
     private final IdempotencyKeysRepository idempotencyKeysRepository;
     private final ObjectMapper objectMapper;
     private final Optional<OrderCacheService> orderCache;
+    private final Optional<OrderMetrics> orderMetrics;
 
     public OrdersService(OrderRepository orderRepository,
                          IdempotencyKeysRepository idempotencyKeysRepository,
                          ObjectMapper objectMapper,
-                         @Autowired(required = false) OrderCacheService orderCache) {
+                         @Autowired(required = false) OrderCacheService orderCache,
+                         @Autowired(required = false) OrderMetrics orderMetrics) {
         this.orderRepository = orderRepository;
         this.idempotencyKeysRepository = idempotencyKeysRepository;
         this.objectMapper = objectMapper;
         this.orderCache = Optional.ofNullable(orderCache);
+        this.orderMetrics = Optional.ofNullable(orderMetrics);
     }
 
     @Override
@@ -94,6 +98,8 @@ public class OrdersService implements IOrderService {
 
         Orders saved = orderRepository.save(order);
 
+        orderMetrics.ifPresent(OrderMetrics::recordOrderCreated);
+
         // after save
         orderCache.ifPresent(cache -> {
             try { cache.invalidate(saved.getId()); }
@@ -127,10 +133,12 @@ public class OrdersService implements IOrderService {
             // Duplicate key: fetch existing and decide
             IdempotencyKeys existing = idempotencyKeysRepository.findById(idempotencyKey).orElseThrow();
             if (!existing.getRequestHash().equals(requestHash)) {
+                orderMetrics.ifPresent(OrderMetrics::recordIdempotencyConflict);
                 throw new IdempotencyConflictException(
                         "Idempotency key was used for a different request");
             }
             if (IdempotencyKeys.STATUS_COMPLETED.equals(existing.getStatus())) {
+                orderMetrics.ifPresent(OrderMetrics::recordIdempotencyHit);
                 return IdempotentCreateResult.replay(
                         existing.getResponseCode(),
                         existing.getResponseBody() != null ? existing.getResponseBody() : "{}");
@@ -138,6 +146,7 @@ public class OrdersService implements IOrderService {
             if (IdempotencyKeys.STATUS_IN_PROGRESS.equals(existing.getStatus())) {
                 throw new IdempotencyStillProcessingException();
             }
+            orderMetrics.ifPresent(OrderMetrics::recordIdempotencyConflict);
             throw new IdempotencyConflictException("Invalid idempotency status: " + existing.getStatus());
         }
 
