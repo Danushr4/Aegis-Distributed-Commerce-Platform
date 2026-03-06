@@ -1,21 +1,17 @@
 spring:
   application:
-    name: inventoryService
-  datasource:
-    url: jdbc:postgresql://localhost:5433/inventory_db
-    username: postgres
-    password: postgres
-    driver-class-name: org.postgresql.Driver
-  jpa:
-    hibernate:
-      ddl-auto: validate
-    show-sql: true
-    properties:
-      hibernate:
-        format_sql: true
-  flyway:
-    enabled: true
-    locations: classpath:db/migration
+    name: paymentService
+
+server:
+  port: 8082
+
+# Mock behavior: latency range (ms), random 5xx probability (0–1), optional simulated timeout delay (ms)
+app:
+  mock:
+    latencyMinMs: 200
+    latencyMaxMs: 800
+    random5xxProbability: 0.05
+    simulatedTimeoutDelayMs: 0
 
 logging:
   pattern:
@@ -35,5 +31,5 @@ management:
     metrics:
       enabled: true
   health:
-    db:
+    diskSpace:
       enabled: true

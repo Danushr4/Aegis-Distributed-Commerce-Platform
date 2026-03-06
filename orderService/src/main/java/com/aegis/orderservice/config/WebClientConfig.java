@@ -1,5 +1,6 @@
 package com.aegis.orderservice.config;
 
+import com.aegis.orderservice.filter.CorrelationIdFilter;
 import io.netty.channel.ChannelOption;
 import io.netty.handler.timeout.ReadTimeoutHandler;
 import io.netty.handler.timeout.WriteTimeoutHandler;
@@ -7,14 +8,16 @@ import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.http.client.reactive.ReactorClientHttpConnector;
+import org.springframework.web.reactive.function.client.ClientRequest;
 import org.springframework.web.reactive.function.client.WebClient;
 import reactor.netty.http.client.HttpClient;
+import org.slf4j.MDC;
 
 import java.time.Duration;
 import java.util.concurrent.TimeUnit;
 
 /**
- * Global WebClient with connect and response timeouts for outbound dependency calls.
+ * Global WebClient with connect and response timeouts; propagates X-Correlation-Id to downstream services.
  */
 @Configuration
 public class WebClientConfig {
@@ -32,6 +35,15 @@ public class WebClientConfig {
 
         return WebClient.builder()
                 .clientConnector(new ReactorClientHttpConnector(httpClient))
+                .filter((request, next) -> {
+                    String correlationId = MDC.get(CorrelationIdFilter.MDC_KEY);
+                    if (correlationId != null && !correlationId.isBlank()) {
+                        request = ClientRequest.from(request)
+                                .header(CorrelationIdFilter.CORRELATION_ID_HEADER, correlationId)
+                                .build();
+                    }
+                    return next.exchange(request);
+                })
                 .build();
     }
 }

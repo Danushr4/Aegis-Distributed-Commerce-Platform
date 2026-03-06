@@ -31,6 +31,8 @@ app:
     connectTimeoutMs: 2000
     responseTimeoutMs: 5000
     dummyBaseUrl: "http://localhost:9999"
+    inventoryBaseUrl: "http://localhost:8081"
+    paymentBaseUrl: "http://localhost:8082"
   rateLimit:
     postOrdersCapacity: 100
     postOrdersRefillPerSecond: 20
@@ -51,6 +53,10 @@ resilience4j:
     instances:
       dummyDependency:
         baseConfig: default
+      inventory:
+        baseConfig: default
+      payment:
+        baseConfig: default
   circuitbreaker:
     configs:
       default:
@@ -62,6 +68,13 @@ resilience4j:
     instances:
       dummyDependency:
         baseConfig: default
+      inventory:
+        baseConfig: default
+        # 4xx (e.g. insufficient stock) should not open the circuit
+        ignoreExceptions: com.aegis.orderservice.client.ClientErrorException
+      payment:
+        baseConfig: default
+        ignoreExceptions: com.aegis.orderservice.client.ClientErrorException
   bulkhead:
     configs:
       default:
@@ -69,6 +82,10 @@ resilience4j:
         maxWaitDuration: 0
     instances:
       dummyDependency:
+        baseConfig: default
+      inventory:
+        baseConfig: default
+      payment:
         baseConfig: default
 
 management:

@@ -1,4 +1,9 @@
 # Test profile: Postgres via Testcontainers (url overridden in test), disable Redis
+# Disable inventory and payment clients so order creation tests don't require external services
+app:
+  dependency:
+    inventoryEnabled: false
+    paymentEnabled: false
 spring:
   autoconfigure:
     exclude:

@@ -4,6 +4,8 @@ import com.aegis.orderservice.Entity.IdempotencyKeys;
 import com.aegis.orderservice.Entity.OrderItems;
 import com.aegis.orderservice.Entity.OrderStatus;
 import com.aegis.orderservice.Entity.Orders;
+import com.aegis.orderservice.client.InventoryClient;
+import com.aegis.orderservice.client.PaymentClient;
 import com.aegis.orderservice.dto.CreateOrderRequest;
 import com.aegis.orderservice.dto.CreateOrderResponse;
 import com.aegis.orderservice.dto.IdempotentCreateResult;
@@ -53,17 +55,23 @@ public class OrdersService implements IOrderService {
     private final ObjectMapper objectMapper;
     private final Optional<OrderCacheService> orderCache;
     private final Optional<OrderMetrics> orderMetrics;
+    private final Optional<InventoryClient> inventoryClient;
+    private final Optional<PaymentClient> paymentClient;
 
     public OrdersService(OrderRepository orderRepository,
                          IdempotencyKeysRepository idempotencyKeysRepository,
                          ObjectMapper objectMapper,
                          @Autowired(required = false) OrderCacheService orderCache,
-                         @Autowired(required = false) OrderMetrics orderMetrics) {
+                         @Autowired(required = false) OrderMetrics orderMetrics,
+                         @Autowired(required = false) InventoryClient inventoryClient,
+                         @Autowired(required = false) PaymentClient paymentClient) {
         this.orderRepository = orderRepository;
         this.idempotencyKeysRepository = idempotencyKeysRepository;
         this.objectMapper = objectMapper;
         this.orderCache = Optional.ofNullable(orderCache);
         this.orderMetrics = Optional.ofNullable(orderMetrics);
+        this.inventoryClient = Optional.ofNullable(inventoryClient);
+        this.paymentClient = Optional.ofNullable(paymentClient);
     }
 
     @Override
@@ -97,6 +105,56 @@ public class OrdersService implements IOrderService {
         order.setItems(items);
 
         Orders saved = orderRepository.save(order);
+
+        if (inventoryClient.isPresent()) {
+            List<InventoryClient.SkuQty> skuQtys = request.getItems().stream()
+                    .map(i -> new InventoryClient.SkuQty(i.getSku(), i.getQty().intValue()))
+                    .toList();
+            try {
+                inventoryClient.get().reserve(saved.getId(), skuQtys);
+                saved.setStatus(OrderStatus.RESERVED);
+                saved.setUpdatedAt(Instant.now());
+                orderRepository.saveAndFlush(saved);
+            } catch (Exception e) {
+                log.warn("Inventory reserve failed for order {}: {}", saved.getId(), e.getMessage());
+                saved.setStatus(OrderStatus.FAILED);
+                saved.setUpdatedAt(Instant.now());
+                orderRepository.saveAndFlush(saved);
+                orderCache.ifPresent(cache -> {
+                    try { cache.invalidate(saved.getId()); }
+                    catch (Exception ex) { log.warn("Failed to invalidate cache: {}", saved.getId(), ex); }
+                });
+                throw e;
+            }
+        }
+
+        // Saga: after RESERVED → authorize payment → PAYMENT_AUTHORIZED → confirm → CONFIRMED
+        if (paymentClient.isPresent() && inventoryClient.isPresent()) {
+            try {
+                paymentClient.get().authorize(saved.getId(), saved.getTotalAmount(), saved.getCurrency());
+                saved.setStatus(OrderStatus.PAYMENT_AUTHORIZED);
+                saved.setUpdatedAt(Instant.now());
+                orderRepository.saveAndFlush(saved);
+                saved.setStatus(OrderStatus.CONFIRMED);
+                saved.setUpdatedAt(Instant.now());
+                orderRepository.saveAndFlush(saved);
+            } catch (Exception e) {
+                log.warn("Payment authorize failed for order {}; compensating (release inventory): {}", saved.getId(), e.getMessage());
+                try {
+                    inventoryClient.get().release(saved.getId());
+                } catch (Exception releaseEx) {
+                    log.error("Compensation failed (release inventory) for order {}: {}", saved.getId(), releaseEx.getMessage(), releaseEx);
+                }
+                saved.setStatus(OrderStatus.CANCELLED);
+                saved.setUpdatedAt(Instant.now());
+                orderRepository.saveAndFlush(saved);
+                orderCache.ifPresent(cache -> {
+                    try { cache.invalidate(saved.getId()); }
+                    catch (Exception ex) { log.warn("Failed to invalidate cache: {}", saved.getId(), ex); }
+                });
+                throw e;
+            }
+        }
 
         orderMetrics.ifPresent(OrderMetrics::recordOrderCreated);
 
